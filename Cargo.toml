@@ -1,5 +1,5 @@
 [package]
-name = "aes256_rust"
+name = "aes256"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,5 +10,5 @@ rand = "0.8"
 base64 = "0.21"
 
 [[bin]]
-name = "aes256_rust"
-path = "aes256_rust.rs"
+name = "aes256"
+path = "aes256"
