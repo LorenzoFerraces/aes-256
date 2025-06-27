@@ -28,13 +28,13 @@ base64 = "0.21"
 
 **Run the example:**
 ```bash
-cargo run --bin aes256_rust
+cargo run --bin aes256
 ```
 
 Or compile and run directly:
 ```bash
-rustc aes256_rust.rs
-./aes256_rust
+rustc aes256.rs
+./aes256
 ```
 
 ## Key Features
@@ -78,7 +78,7 @@ Messages match: true
 ## File Structure
 
 ```
-├── aes256_rust.rs        # Rust implementation
+├── aes256.rs        # Rust implementation
 ├── Cargo.toml           # Dependencies configuration
 └── README.md            # This file
 ```
