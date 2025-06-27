@@ -1,9 +1,10 @@
 use aes::Aes256;
 use base64::{engine::general_purpose, Engine as _};
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use cbc::{Decryptor, Encryptor};
 use rand::Rng;
-use std::io::{self, Write};
+use std::io::{self, Write, Read};
+use std::fs::{OpenOptions, File};
+use std::path::Path;
 
 // Create type aliases for AES-256-CBC
 type Aes256CbcEnc = cbc::Encryptor<Aes256>;
@@ -38,24 +39,25 @@ impl AES256 {
         Ok(Self { key })
     }
 
-    pub fn encrypt(&self, plaintext: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn encrypt_file(&self, mut file: &File, path: String) -> Result<(), Box<dyn std::error::Error>> {
         // Generate random IV
         let mut iv = [0u8; 16];
+        let mut file_bytes = Vec::new();
+        file.read_to_end(&mut file_bytes)?;
         rand::thread_rng().fill(&mut iv);
 
         // Create encryptor
         let cipher = Aes256CbcEnc::new(&self.key.into(), &iv.into());
 
         // Prepare buffer for encryption (need space for padding)
-        let plaintext_bytes = plaintext.as_bytes();
-        let mut buffer = vec![0u8; plaintext_bytes.len() + 16]; // Extra space for padding
-        buffer[0..plaintext_bytes.len()].copy_from_slice(plaintext_bytes);
+        let mut buffer = vec![0u8; file_bytes.len() + 16]; // Extra space for padding
+        buffer[0..file_bytes.len()].copy_from_slice(file_bytes.as_slice());
 
         // Encrypt the data with PKCS7 padding
         let ciphertext = cipher
             .encrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(
                 &mut buffer,
-                plaintext_bytes.len(),
+                file_bytes.len(),
             )
             .map_err(|e| format!("Encryption failed: {:?}", e))?;
 
@@ -65,13 +67,21 @@ impl AES256 {
         result.extend_from_slice(ciphertext);
 
         // Encode to base64
-        Ok(general_purpose::STANDARD.encode(&result))
+        let encode = base64::engine::general_purpose::STANDARD.encode(&result);
+
+        // Return the encrypted file
+        let mut new_file = File::create(path)?;
+        new_file.write_all(encode.as_bytes())?;
+
+        Ok(())
     }
 
-    pub fn decrypt(&self, encrypted_data: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn decrypt_file(&self, mut encrypted_file: &File, path: String) -> Result<(), Box<dyn std::error::Error>> {
+        let mut file_bytes = Vec::new();
+        encrypted_file.read_to_end(&mut file_bytes)?;
         // Decode from base64
-        let data = general_purpose::STANDARD
-            .decode(encrypted_data)
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(file_bytes)
             .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
         if data.len() < 16 {
@@ -93,9 +103,11 @@ impl AES256 {
             .decrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(&mut buffer)
             .map_err(|e| format!("Failed to decrypt: {:?}", e))?;
 
-        // Convert to string
-        String::from_utf8(plaintext.to_vec())
-            .map_err(|e| format!("Failed to convert to UTF-8: {}", e).into())
+        // Return the decrypted file
+        let mut new_file = File::create(path)?;
+        new_file.write_all(plaintext)?;
+        
+        Ok(())
     }
 
     pub fn get_key_base64(&self) -> String {
@@ -113,9 +125,9 @@ fn print_menu() {
     println!("\nAES-256 Encryption Utility");
     println!("-------------------------");
     println!("1. Generate new key");
-    println!("2. Input message to encrypt");
-    println!("3. Encrypt message (uses 'Hello, World!' if no message set)");
-    println!("4. Decrypt message");
+    println!("2. Input path to the file to encrypt");
+    println!("3. Encrypt file");
+    println!("4. Decrypt file");
     println!("5. Show current key");
     println!("6. Load key from base64");
     println!("0. Exit");
@@ -133,7 +145,7 @@ fn get_input(prompt: &str) -> String {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut aes = AES256::new();
-    let mut current_message = String::new();
+    let mut current_path = String::new();
     let mut last_encrypted = String::new();
 
     loop {
@@ -149,36 +161,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Key (base64): {}", aes.get_key_base64());
             }
             "2" => {
-                current_message = get_input("Enter message to encrypt: ");
-                println!("Message stored for encryption.");
+                current_path = get_input("Enter the path to the file to encrypt: ");
+                println!("File stored for encryption.");
             }
             "3" => {
-                let message = if current_message.is_empty() {
-                    "Hello, World!"
-                } else {
-                    &current_message
+                if current_path.is_empty() {
+                    current_path = get_input("Enter the path to the file to encrypt: ")
                 };
 
-                println!("Encrypting: {}", message);
-                match aes.encrypt(message) {
-                    Ok(encrypted) => {
-                        last_encrypted = encrypted.clone();
-                        println!("Encrypted (base64): {}", encrypted);
+                let path = Path::new(&current_path);
+                if path.exists() && path.is_file() {
+                    println!("Encrypting");
+                    let file = OpenOptions::new().write(true).read(true).open(&current_path)?;
+                    match aes.encrypt_file(&file, current_path.clone()) {
+                        Ok(()) => {
+                            last_encrypted = current_path.clone();
+                            println!("Encrypted (base64)");
+                        }
+                        Err(e) => println!("Encryption error: {}", e),
                     }
-                    Err(e) => println!("Encryption error: {}", e),
+                } else {
+                    println!("The file or path does not exist. Try again.");
+                    current_path = "".to_string()
                 }
+                
             }
             "4" => {
-                let encrypted = if last_encrypted.is_empty() {
-                    get_input("Enter encrypted message (base64): ")
-                } else {
-                    println!("Using last encrypted message: {}", last_encrypted);
-                    last_encrypted.clone()
+                if last_encrypted.is_empty() {
+                    last_encrypted = get_input("Enter the path to the encrypted file (base64): ")
                 };
 
-                match aes.decrypt(&encrypted) {
-                    Ok(decrypted) => println!("Decrypted message: {}", decrypted),
-                    Err(e) => println!("Decryption error: {}", e),
+                let path = Path::new(&last_encrypted);
+                if path.exists() && path.is_file() {
+                    let file = OpenOptions::new().write(true).read(true).open(&last_encrypted)?;
+                    match aes.decrypt_file(&file, last_encrypted.clone()) {
+                        Ok(()) => println!("Decrypted file"),
+                        Err(e) => println!("Decryption error: {}", e),
+                    }
+                } else {
+                    println!("The file or path does not exist. Try again.");
+                    last_encrypted = "".to_string()
                 }
             }
             "5" => {
@@ -207,12 +229,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-// Cargo.toml dependencies:
-/*
-[dependencies]
-aes = "0.8"
-block-modes = "0.9"
-rand = "0.8"
-base64 = "0.21"
-*/
