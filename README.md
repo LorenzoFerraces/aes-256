@@ -31,12 +31,6 @@ base64 = "0.21"
 cargo run --bin aes256
 ```
 
-Or compile and run directly:
-```bash
-rustc aes256.rs
-./aes256
-```
-
 ## Key Features
 
 - **Memory-safe**: Implementation using Rust's type system prevents common cryptographic vulnerabilities
